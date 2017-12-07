@@ -4,7 +4,7 @@
 
 跟物体检测相比，语义分割预测的边框更加精细。
 
-本项目我们将利用卷积神经网络解决语义分割的一个开创性工作之一：[全链接卷积网络](https://arxiv.org/abs/1411.4038)。在此之前我们先了解用来做语义分割的数据。
+本项目我们将利用卷积神经网络解决语义分割的一个开创性工作之一：[全链接卷积网络](https://arxiv.org/abs/1411.4038)。
 
 ## 数据集
 
@@ -116,14 +116,8 @@ def image2label(im):
     return nd.array(cm2lbl[idx])
 ```
 
-可以看到第一张训练图片的标号里面属于飞机的像素被标记成了1.
-
-```{.python .input  n=7}
-y = image2label(train_labels[0])
-y[105:115, 130:140]
-```
-
-现在我们可以定义数据读取了。每一次我们将图片和标注随机剪切到要求的形状，并将标注里每个像素转成对应的标号。简单起见我们将小于要求大小的图片全部过滤掉了。
+## 数据读取
+每一次我们将图片和标注随机剪切到要求的形状，并将标注里每个像素转成对应的标号。简单起见我们将小于要求大小的图片全部过滤掉了。
 
 ```{.python .input  n=8}
 from mxnet import gluon
@@ -163,7 +157,7 @@ class VOCSegDataset(gluon.data.Dataset):
         return len(self.data)
 ```
 
-我们采用$320\times 480$的大小用来训练，注意到这个比前面我们使用的$224\times 224$要大上很多。但是同样我们将长宽都定义成了32的整数倍。
+我们采用$320\times 480$的大小用来训练。
 
 ```{.python .input  n=9}
 # height x width
@@ -172,7 +166,7 @@ voc_train = VOCSegDataset(True, input_shape)
 voc_test = VOCSegDataset(False, input_shape)
 ```
 
-最后定义批量读取。可以看到跟之前的不同是批量标号不再是一个向量，而是一个三维数组。
+最后定义批量读取。
 
 ```{.python .input  n=10}
 batch_size = 64
@@ -188,40 +182,6 @@ for data, label in train_data:
 ```
 
 ## 全连接卷积网络
-
-在数据的处理过程我们看到语义分割跟前面介绍的应用的主要区别在于，预测的标号不再是一个或者几个数字，而是每个像素都需要有标号。在卷积神经网络里，我们通过卷积层和池化层逐渐减少数据长宽但同时增加通道数。例如ResNet18里，我们先将输入长宽减少32倍，由$3\times 224\times 224$的图片转成$512\times 7 \times 7$的输出，应该全局池化层变成$512$长向量，然后最后通过全链接层转成一个长度为$n$的输出向量，这里$n$是类数，既`num_classes`。但在这里，对于输出为$3\times 320 \times 480$的图片，我们需要输出是$n \times 320 \times 480$，就是每个输入像素都需要预测一个长度为$n$的向量。
-
-全连接卷积网络（FCN）的提出是基于这样一个观察。假设$f$是一个卷积层，而且$y=f(x)$。那么在反传求导时，$\partial f(y)$会返回一个跟$x$一样形状的输出。卷积是一个对偶函数，就是$\partial^2 f = f$。那么如果我们想得到跟输入一样的输入，那么定义$g = \partial f$，这样$g(f(x))$就能达到我们想要的。
-
-具体来说，我们定义一个卷积转置层（transposed convolutional, 也经常被错误的叫做deconvolutions），它就是将卷积层的`forward`和`backward`函数兑换。
-
-下面例子里我们看到使用同样的参数，除了替换输入和输出通道数外，`Conv2DTranspose`可以将`nn.Conv2D`的输出还原其输入大小。
-
-```{.python .input  n=11}
-from mxnet.gluon import nn
-
-conv = nn.Conv2D(10, kernel_size=4, padding=1, strides=2)
-conv_trans = nn.Conv2DTranspose(3, kernel_size=4, padding=1, strides=2)
-
-conv.initialize()
-conv_trans.initialize()
-
-x = nd.random.uniform(shape=(1,3,64,64))
-y = conv(x)
-print('Input:', x.shape)
-print('After conv:', y.shape)
-print('After transposed conv', conv_trans(y).shape)
-```
-
-另外一点要注意的是，在最后的卷积层我们同样使用平化层（`nn.Flattern`）或者（全局）池化层来使得方便使用之后的全连接层作为输出。但是这样会损害空间信息，而这个对语义分割很重要。一个解决办法是去掉不需要的池化层，并将全连接层替换成$1\times 1$卷基层。
-
-所以给定一个卷积网络，FCN主要做下面的改动
-
-- 替换全连接层成$1\times 1$卷基
-- 去掉过于损失空间信息的池化层，例如全局池化
-- 最后接上卷积转置层来得到需要大小的输出
-- 为了训练更快，通常权重会初始化称预先训练好的权重
-
 
 下面我们基于Resnet18来创建FCN。首先我们下载一个预先训练好的模型。
 
@@ -258,7 +218,7 @@ with net.name_scope():
 
 ## 训练
 
-训练的时候我们需要初始化新添加的两层。我们可以随机初始化，但实际中发现将卷积转置层初始化成双线性差值函数可以使得训练更容易。
+将卷积转置层初始化成双线性差值函数。
 
 ```{.python .input  n=15}
 def bilinear_kernel(in_channels, out_channels, kernel_size):
@@ -278,33 +238,9 @@ def bilinear_kernel(in_channels, out_channels, kernel_size):
 
 ```
 
-下面代码演示这样的初始化等价于对图片进行双线性差值放大。
-
-```{.python .input  n=16}
-from matplotlib import pyplot as plt
-
-x = train_images[0]
-print('Input', x.shape)
-x = x.astype('float32').transpose((2,0,1)).expand_dims(axis=0)/255
-
-conv_trans = nn.Conv2DTranspose(
-    3, in_channels=3, kernel_size=8, padding=2, strides=4)
-conv_trans.initialize()
-conv_trans(x)
-conv_trans.weight.set_data(bilinear_kernel(3, 3, 8))
-
-
-y = conv_trans(x)
-y = y[0].clip(0,1).transpose((1,2,0))
-print('Output', y.shape)
-
-plt.imshow(y.asnumpy())
-plt.show()
-```
-
 所以网络的初始化包括了三部分。主体卷积网络从训练好的ResNet18复制得来，替代ResNet18最后全连接的卷积层使用随机初始化。
 
-最后的卷积转置层则使用双线性差值。对于卷积转置层，我们可以自定义一个初始化类。简单起见，这里我们直接通过权重的`set_data`函数改写权重。记得我们介绍过Gluon使用延后初始化来减少构造网络时需要制定输入大小。所以我们先随意初始化它，计算一次`forward`，然后再改写权重。
+最后的卷积转置层则使用双线性差值。对于卷积转置层，我们可以自定义一个初始化类。简单起见，这里我们直接通过权重的`set_data`函数改写权重。
 
 ```{.python .input  n=110}
 from mxnet import init
@@ -320,8 +256,7 @@ shape = conv_trans.weight.data().shape
 conv_trans.weight.set_data(bilinear_kernel(*shape[0:3]))
 
 ```
-
-这时候我们可以真正开始训练了。值得一提的是我们使用卷积转置层的通道来预测像素的类别。所以在做`softmax`和预测的时候我们需要使用通道这个维度，既维度1. 所以在`SoftmaxCrossEntropyLoss`里加入了额外了`axis=1`选项。其他的部分跟之前的训练一致。
+##训练
 
 ```{.python .input}
 import sys
