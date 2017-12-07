@@ -48,26 +48,9 @@ def read_images(root=voc_root, train=True):
     return data, label
 ```
 
-我们画出前面三张图片和它们对应的标号。在标号中，白色代表边框黑色代表背景，其他不同的颜色对应不同物体。
+为了能将多张图片合并成一个批量来加速计算，我们需要输入图片都是同样的大小。
 
-```{.python .input  n=3}
-import sys
-sys.path.append('..')
-import utils
-
-train_images, train_labels = read_images()
-
-imgs = []
-for i in range(3):
-    imgs += [train_images[i], train_labels[i]]
-
-utils.show_images(imgs, nrows=3, ncols=2, figsize=(12,8))
-[im.shape for im in imgs]
-```
-
-同时注意到图片的宽度基本是500，但高度各不一样。为了能将多张图片合并成一个批量来加速计算，我们需要输入图片都是同样的大小。之前我们通过`imresize`来将他们调整成同样的大小。但在语义分割里，我们需要对标注做同样的变化来达到像素级别的匹配。但调整大小将改变像素颜色，使得再将它们映射到物体类别变得困难。
-
-这里我们仅仅使用剪切来解决这个问题。就是说对于输入图片，我们随机剪切出一个固定大小的区域，然后对标号图片做同样位置的剪切。
+这里我们使用剪切来解决这个问题。就是说对于输入图片，我们随机剪切出一个固定大小的区域，然后对标号图片做同样位置的剪切。
 
 ```{.python .input  n=4}
 def rand_crop(data, label, height, width):
